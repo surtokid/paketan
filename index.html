@@ -806,20 +806,27 @@
                 let recommendations = [];
 
                 if (gasWebAppUrl && !forceDemo) {
-                    // Call Google Apps Script Backend Endpoint
-                    const response = await fetch(gasWebAppUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify({
-                            action: 'generatePackageNames',
-                            products: productNames
-                        })
-                    });
-                    const result = await response.json();
-                    if (result.status === 'success' && Array.isArray(result.data)) {
-                        recommendations = result.data;
-                    } else {
-                        throw new Error(result.message || 'Gagal menerima rekomendasi dari Gemini');
+                    try {
+                        // Call Google Apps Script Backend Endpoint
+                        const response = await fetch(gasWebAppUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                            body: JSON.stringify({
+                                action: 'generatePackageNames',
+                                products: productNames
+                            })
+                        });
+                        const result = await response.json();
+                        if (result.status === 'success' && Array.isArray(result.data)) {
+                            recommendations = result.data;
+                        } else {
+                            throw new Error(result.message || 'Gagal menerima rekomendasi dari Gemini');
+                        }
+                    } catch (fetchErr) {
+                        if (fetchErr.name === 'TypeError' && fetchErr.message.includes('fetch')) {
+                            throw new Error('Koneksi ke Apps Script diblokir/gagal (Failed to fetch). Pastikan fungsi doPost() ada di Code.gs dan Web App di-deploy dengan akses "Anyone".');
+                        }
+                        throw fetchErr;
                     }
                 } else {
                     // Fallback Demo AI Simulation (Simulates 1.2s delay)
@@ -837,7 +844,7 @@
                 document.getElementById('aiErrorState').classList.remove('hidden');
                 document.getElementById('aiErrorMessage').innerHTML = `
                     ${err.message || 'Gagal terhubung ke Gemini AI API.'}<br>
-                    <span class="text-[11px] text-slate-500 mt-1 block">Pastikan <code>GEMINI_API_KEY</code> sudah ditambahkan pada <strong>Project Settings ⚙️ &gt; Script Properties</strong> di Apps Script.</span>
+                    <span class="text-[11px] text-slate-500 mt-1 block">Gunakan tombol <strong>Gunakan Demo AI</strong> di bawah jika running di iFrame / tanpa koneksi Apps Script.</span>
                 `;
             }
         }
