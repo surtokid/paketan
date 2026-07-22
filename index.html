@@ -154,6 +154,12 @@
         ::-webkit-scrollbar-thumb:hover {
             background: rgba(148, 163, 184, 1);
         }
+
+        /* GPU Acceleration for silky smooth 60fps animations */
+        .bottom-sheet, #cameraPreviewContainer {
+            will-change: transform, opacity;
+            transform: translateZ(0);
+        }
     </style>
 </head>
 <body class="text-slate-800 antialiased pb-28 md:pb-10">
@@ -302,21 +308,7 @@
 
             <!-- List Container -->
             <div id="productListContainer" class="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-                <!-- Empty State -->
-                <div id="emptyListState" class="py-12 flex flex-col items-center justify-center text-center space-y-3 border-2 border-dashed border-slate-200 rounded-2xl bg-white/40">
-                    <div class="w-16 h-16 rounded-3xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-400 text-2xl">
-                        <i class="fa-solid fa-basket-shopping"></i>
-                    </div>
-                    <div>
-                        <p class="font-bold text-slate-700 text-sm">Belum Ada Produk Discan</p>
-                        <p class="text-xs text-slate-400 mt-0.5">Scan barcode atau cari produk secara manual untuk menambahkan</p>
-                    </div>
-                    <button onclick="openManualSearchModal()" class="mt-1 px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs shadow-md hover:bg-indigo-700 transition">
-                        + Tambah Produk Manual
-                    </button>
-                </div>
-
-                <!-- Dynamic Item Rows populated by JS -->
+                <!-- Rendered by JS -->
             </div>
         </section>
 
@@ -364,18 +356,24 @@
         </div>
 
         <!-- Error State with Retry Button -->
-        <div id="aiErrorState" class="hidden py-8 text-center space-y-4 bg-rose-50/80 rounded-2xl border border-rose-200/80 p-5">
+        <div id="aiErrorState" class="hidden py-6 text-center space-y-4 bg-rose-50/80 rounded-2xl border border-rose-200/80 p-5">
             <div class="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 mx-auto flex items-center justify-center text-xl">
                 <i class="fa-solid fa-triangle-exclamation"></i>
             </div>
             <div>
                 <p class="font-bold text-slate-800 text-sm">Gagal Menggenerasi Nama Paket</p>
-                <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto" id="aiErrorMessage">Terjadi kesalahan saat memproses permintaan AI.</p>
+                <div class="text-xs text-slate-600 mt-1 max-w-sm mx-auto leading-relaxed" id="aiErrorMessage">Terjadi kesalahan saat memproses permintaan AI.</div>
             </div>
-            <button onclick="triggerGenerateAiName()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-2">
-                <i class="fa-solid fa-rotate-right"></i>
-                <span>Coba Lagi (Retry)</span>
-            </button>
+            <div class="flex items-center justify-center gap-2 pt-1 flex-wrap">
+                <button onclick="triggerGenerateAiName(false)" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    <span>Coba Lagi</span>
+                </button>
+                <button onclick="triggerGenerateAiName(true)" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5">
+                    <i class="fa-solid fa-wand-magic"></i>
+                    <span>Gunakan Demo AI</span>
+                </button>
+            </div>
         </div>
 
         <!-- Dynamic Recommendation Cards Container -->
@@ -487,13 +485,30 @@
             }
         }
 
-        // Initialization on DOM Ready
-        document.addEventListener('DOMContentLoaded', async () => {
+        // Initialization on DOM Ready - Instant Render
+        document.addEventListener('DOMContentLoaded', () => {
             generateRandomPackageId();
             updateApiStatusBadge();
-            await loadMasterProducts();
+            
+            // 1. Instant load from Cache for 0ms delay
+            loadMasterProductsFromCache();
             renderScannedProducts();
+            
+            // 2. Fetch fresh data in background without blocking UI
+            fetchMasterProductsInBackground();
         });
+
+        // Load Master Products instantly from Local Storage Cache
+        function loadMasterProductsFromCache() {
+            const cached = localStorage.getItem('CACHED_MASTER_PRODUCTS');
+            if (cached) {
+                try {
+                    masterProducts = JSON.parse(cached);
+                    return;
+                } catch (e) {}
+            }
+            masterProducts = MOCK_MASTER_PRODUCTS;
+        }
 
         // Generate ID Paket Format (PKG-2026MMDD-XXX)
         function generateRandomPackageId() {
@@ -523,22 +538,19 @@
             }
         }
 
-        // Load Master Products from Apps Script or Mock Data
-        async function loadMasterProducts() {
-            if (gasWebAppUrl) {
-                try {
-                    const response = await fetch(`${gasWebAppUrl}?action=getMasterProducts`);
-                    const result = await response.json();
-                    if (result && result.status === 'success' && Array.isArray(result.data)) {
-                        masterProducts = result.data;
-                        showToast('Berhasil memuat Master Produk dari Google Sheet', 'success');
-                        return;
-                    }
-                } catch (err) {
-                    console.warn('Gagal memuat dari GAS, menggunakan data fallback lokal:', err);
+        // Async Background Fetch from Google Apps Script
+        async function fetchMasterProductsInBackground() {
+            if (!gasWebAppUrl) return;
+            try {
+                const response = await fetch(`${gasWebAppUrl}?action=getMasterProducts`);
+                const result = await response.json();
+                if (result && result.status === 'success' && Array.isArray(result.data) && result.data.length > 0) {
+                    masterProducts = result.data;
+                    localStorage.setItem('CACHED_MASTER_PRODUCTS', JSON.stringify(result.data));
                 }
+            } catch (err) {
+                console.warn('Gagal memperbarui master produk dari background:', err);
             }
-            masterProducts = MOCK_MASTER_PRODUCTS;
         }
 
         // Toggle Camera Scanner State
@@ -550,7 +562,7 @@
             }
         }
 
-        // Start Camera Scanner (Slide Down + Fade In + Request Access)
+        // Start Camera Scanner (Fast & Hardware Accelerated)
         async function startCameraScanner() {
             const container = document.getElementById('cameraPreviewContainer');
             const btn = document.getElementById('toggleScannerBtn');
@@ -559,7 +571,7 @@
 
             // 1. Reveal container in DOM
             container.classList.remove('hidden');
-            void container.offsetHeight; // Force reflow for smooth animation
+            void container.offsetHeight; // Force reflow
             container.classList.remove('opacity-0', 'max-h-0');
             container.classList.add('opacity-100', 'max-h-[500px]');
 
@@ -569,10 +581,14 @@
             btnText.innerText = 'Tutup Kamera';
             btnIcon.className = 'fa-solid fa-camera-rotate';
 
-            // 3. Initialize Scanner Instance only after container is visible
+            // 3. Initialize Scanner with Native Hardware Speed Config
             try {
-                html5QrCodeScanner = new Html5Qrcode("reader");
-                const config = { fps: 10, qrbox: { width: 220, height: 180 } };
+                html5QrCodeScanner = new Html5Qrcode("reader", {
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true // Uses fast native Android/iOS Chrome Barcode API
+                    }
+                });
+                const config = { fps: 12, qrbox: { width: 220, height: 180 } };
 
                 await html5QrCodeScanner.start(
                     { facingMode: "environment" },
@@ -586,7 +602,7 @@
             }
         }
 
-        // Stop Camera Scanner (Destroy Instance + Release Stream + Fade Out + Slide Up)
+        // Stop Camera Scanner
         async function stopCameraScanner() {
             const container = document.getElementById('cameraPreviewContainer');
             const btn = document.getElementById('toggleScannerBtn');
@@ -670,22 +686,33 @@
         // Render Scanned Product Rows
         function renderScannedProducts() {
             const container = document.getElementById('productListContainer');
-            const emptyState = document.getElementById('emptyListState');
             const clearBtn = document.getElementById('clearListBtn');
             const counterBadge = document.getElementById('scanCounterBadge');
+
+            if (!container) return;
 
             let totalItems = 0;
             let totalPrice = 0;
 
             if (scannedItems.length === 0) {
-                container.innerHTML = '';
-                container.appendChild(emptyState);
-                emptyState.classList.remove('hidden');
-                clearBtn.classList.add('hidden');
-                counterBadge.innerText = '0 Discan';
+                container.innerHTML = `
+                    <div id="emptyListState" class="py-12 flex flex-col items-center justify-center text-center space-y-3 border-2 border-dashed border-slate-200 rounded-2xl bg-white/40">
+                        <div class="w-16 h-16 rounded-3xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-400 text-2xl">
+                            <i class="fa-solid fa-basket-shopping"></i>
+                        </div>
+                        <div>
+                            <p class="font-bold text-slate-700 text-sm">Belum Ada Produk Discan</p>
+                            <p class="text-xs text-slate-400 mt-0.5">Scan barcode atau cari produk secara manual untuk menambahkan</p>
+                        </div>
+                        <button onclick="openManualSearchModal()" class="mt-1 px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs shadow-md hover:bg-indigo-700 transition">
+                            + Tambah Produk Manual
+                        </button>
+                    </div>
+                `;
+                if (clearBtn) clearBtn.classList.add('hidden');
+                if (counterBadge) counterBadge.innerText = '0 Discan';
             } else {
-                emptyState.classList.add('hidden');
-                clearBtn.classList.remove('hidden');
+                if (clearBtn) clearBtn.classList.remove('hidden');
 
                 let html = '';
                 scannedItems.forEach((item, index) => {
@@ -726,11 +753,13 @@
                 });
 
                 container.innerHTML = html;
-                counterBadge.innerText = `${scannedItems.length} Produk (${totalItems} Pcs)`;
+                if (counterBadge) counterBadge.innerText = `${scannedItems.length} Produk (${totalItems} Pcs)`;
             }
 
-            document.getElementById('totalItemsCount').innerText = `${totalItems} Item`;
-            document.getElementById('totalPriceDisplay').innerText = `Rp ${totalPrice.toLocaleString('id-ID')}`;
+            const itemsCountElem = document.getElementById('totalItemsCount');
+            const totalPriceElem = document.getElementById('totalPriceDisplay');
+            if (itemsCountElem) itemsCountElem.innerText = `${totalItems} Item`;
+            if (totalPriceElem) totalPriceElem.innerText = `Rp ${totalPrice.toLocaleString('id-ID')}`;
         }
 
         // Update Quantity
@@ -759,7 +788,7 @@
         }
 
         // Trigger Gemini AI Package Name Generator
-        async function triggerGenerateAiName() {
+        async function triggerGenerateAiName(forceDemo = false) {
             if (scannedItems.length === 0) {
                 showToast('Silakan scan minimal 1 produk terlebih dahulu!', 'warning');
                 return;
@@ -776,7 +805,7 @@
             try {
                 let recommendations = [];
 
-                if (gasWebAppUrl) {
+                if (gasWebAppUrl && !forceDemo) {
                     // Call Google Apps Script Backend Endpoint
                     const response = await fetch(gasWebAppUrl, {
                         method: 'POST',
@@ -793,8 +822,8 @@
                         throw new Error(result.message || 'Gagal menerima rekomendasi dari Gemini');
                     }
                 } else {
-                    // Fallback Demo AI Simulation (Simulates 1.5s delay)
-                    await new Promise(r => setTimeout(r, 1500));
+                    // Fallback Demo AI Simulation (Simulates 1.2s delay)
+                    await new Promise(r => setTimeout(r, 1200));
                     recommendations = generateMockAiNames(scannedItems);
                 }
 
@@ -806,7 +835,10 @@
                 console.error(err);
                 document.getElementById('aiSkeletonLoader').classList.add('hidden');
                 document.getElementById('aiErrorState').classList.remove('hidden');
-                document.getElementById('aiErrorMessage').innerText = err.message || 'Gagal terhubung ke Gemini AI API.';
+                document.getElementById('aiErrorMessage').innerHTML = `
+                    ${err.message || 'Gagal terhubung ke Gemini AI API.'}<br>
+                    <span class="text-[11px] text-slate-500 mt-1 block">Pastikan <code>GEMINI_API_KEY</code> sudah ditambahkan pada <strong>Project Settings ⚙️ &gt; Script Properties</strong> di Apps Script.</span>
+                `;
             }
         }
 
