@@ -198,8 +198,8 @@
 
             <!-- Scanner Card (MD: 5 cols) -->
             <section class="md:col-span-5 glass-card rounded-3xl p-5 flex flex-col justify-between space-y-4">
-                <div>
-                    <div class="flex items-center justify-between mb-3">
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
                             <i class="fa-solid fa-barcode text-indigo-600 text-lg"></i>
                             <h2 class="font-bold text-slate-800 text-base">Scan Barcode</h2>
@@ -209,37 +209,24 @@
                         </span>
                     </div>
 
-                    <!-- Camera View Area -->
-                    <div class="relative w-full aspect-square bg-slate-900 rounded-2xl overflow-hidden shadow-inner flex flex-col items-center justify-center border border-slate-800">
-                        <div id="reader" class="w-full h-full"></div>
-
-                        <!-- Scanner Overlay Laser Lines when Scanning -->
-                        <div id="scannerOverlay" class="hidden absolute inset-0 pointer-events-none">
-                            <div class="scanner-laser"></div>
-                            <div class="absolute inset-8 border-2 border-dashed border-indigo-400/60 rounded-2xl"></div>
-                        </div>
-
-                        <!-- Standby / Camera Off View -->
-                        <div id="scannerPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-slate-900/90 backdrop-blur-sm text-white space-y-3">
-                            <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 text-2xl animate-float">
-                                <i class="fa-solid fa-camera"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm font-bold">Kamera Non-Aktif</p>
-                                <p class="text-xs text-slate-400 mt-1">Klik tombol di bawah untuk mulai memindai barcode produk</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Scanner Controls -->
-                <div class="space-y-2">
-                    <button id="toggleScannerBtn" onclick="toggleCameraScanner()" class="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-bold text-sm shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all">
-                        <i class="fa-solid fa-camera"></i>
+                    <!-- Scanner Control Button -->
+                    <button id="toggleScannerBtn" onclick="toggleCameraScanner()" class="w-full py-3.5 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-bold text-sm shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all">
+                        <i id="scannerBtnIcon" class="fa-solid fa-camera"></i>
                         <span id="scannerBtnText">Aktifkan Kamera Scan</span>
                     </button>
 
-                    <div class="grid grid-cols-2 gap-2">
+                    <!-- Camera Preview Container (Hidden by default, slides down & fades in when active) -->
+                    <div id="cameraPreviewContainer" class="hidden opacity-0 max-h-0 overflow-hidden transition-all duration-300 ease-in-out">
+                        <div class="relative w-full aspect-square bg-slate-900 rounded-2xl overflow-hidden shadow-inner border border-slate-800 mt-2">
+                            <div id="reader" class="w-full h-full"></div>
+                            <div id="scannerOverlay" class="absolute inset-0 pointer-events-none">
+                                <div class="scanner-laser"></div>
+                                <div class="absolute inset-8 border-2 border-dashed border-indigo-400/60 rounded-2xl"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 pt-1">
                         <button onclick="openManualSearchModal()" class="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition">
                             <i class="fa-solid fa-magnifying-glass text-indigo-500"></i> Cari Produk
                         </button>
@@ -461,8 +448,10 @@
         let masterProducts = [];
         let scannedItems = []; // Array of { product, quantity }
         let html5QrCodeScanner = null;
-        let isScannerActive = false;
-        let gasWebAppUrl = localStorage.getItem('GAS_WEB_APP_URL') || '';
+        let cameraActive = false;
+        
+        // Direct GAS Web App URL Integration
+        let gasWebAppUrl = 'https://script.google.com/macros/s/AKfycbz7Kynp524pzXS33m8tI7skFHZyBTuX78dkCnNm5PD2wbUpV1p-vVYvgeMhrVfhV94K/exec';
 
         // Mock Default Master Products (Used in demo mode or initial fallback)
         const MOCK_MASTER_PRODUCTS = [
@@ -552,46 +541,88 @@
             masterProducts = MOCK_MASTER_PRODUCTS;
         }
 
-        // Toggle HTML5 Barcode Camera Scanner
+        // Toggle Camera Scanner State
         async function toggleCameraScanner() {
-            const placeholder = document.getElementById('scannerPlaceholder');
-            const overlay = document.getElementById('scannerOverlay');
-            const btnText = document.getElementById('scannerBtnText');
-
-            if (isScannerActive) {
-                // Stop Scanner
-                if (html5QrCodeScanner) {
-                    await html5QrCodeScanner.stop();
-                    html5QrCodeScanner = null;
-                }
-                isScannerActive = false;
-                placeholder.classList.remove('hidden');
-                overlay.classList.add('hidden');
-                btnText.innerText = 'Aktifkan Kamera Scan';
+            if (cameraActive) {
+                await stopCameraScanner();
             } else {
-                // Start Scanner
-                placeholder.classList.add('hidden');
-                overlay.classList.remove('hidden');
-                btnText.innerText = 'Matikan Kamera';
+                await startCameraScanner();
+            }
+        }
 
+        // Start Camera Scanner (Slide Down + Fade In + Request Access)
+        async function startCameraScanner() {
+            const container = document.getElementById('cameraPreviewContainer');
+            const btn = document.getElementById('toggleScannerBtn');
+            const btnText = document.getElementById('scannerBtnText');
+            const btnIcon = document.getElementById('scannerBtnIcon');
+
+            // 1. Reveal container in DOM
+            container.classList.remove('hidden');
+            void container.offsetHeight; // Force reflow for smooth animation
+            container.classList.remove('opacity-0', 'max-h-0');
+            container.classList.add('opacity-100', 'max-h-[500px]');
+
+            // 2. Change Button UI
+            btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700', 'shadow-indigo-500/25');
+            btn.classList.add('bg-rose-600', 'hover:bg-rose-700', 'shadow-rose-500/25');
+            btnText.innerText = 'Tutup Kamera';
+            btnIcon.className = 'fa-solid fa-camera-rotate';
+
+            // 3. Initialize Scanner Instance only after container is visible
+            try {
                 html5QrCodeScanner = new Html5Qrcode("reader");
                 const config = { fps: 10, qrbox: { width: 220, height: 180 } };
 
-                try {
-                    await html5QrCodeScanner.start(
-                        { facingMode: "environment" },
-                        config,
-                        onBarcodeScanSuccess
-                    );
-                    isScannerActive = true;
-                } catch (err) {
-                    showToast('Gagal mengakses kamera device: ' + err, 'error');
-                    placeholder.classList.remove('hidden');
-                    overlay.classList.add('hidden');
-                    btnText.innerText = 'Aktifkan Kamera Scan';
-                    isScannerActive = false;
-                }
+                await html5QrCodeScanner.start(
+                    { facingMode: "environment" },
+                    config,
+                    onBarcodeScanSuccess
+                );
+                cameraActive = true;
+            } catch (err) {
+                showToast('Gagal mengakses kamera: ' + err, 'error');
+                await stopCameraScanner();
             }
+        }
+
+        // Stop Camera Scanner (Destroy Instance + Release Stream + Fade Out + Slide Up)
+        async function stopCameraScanner() {
+            const container = document.getElementById('cameraPreviewContainer');
+            const btn = document.getElementById('toggleScannerBtn');
+            const btnText = document.getElementById('scannerBtnText');
+            const btnIcon = document.getElementById('scannerBtnIcon');
+
+            // Stop stream & clear scanner instance to prevent memory leaks
+            if (html5QrCodeScanner) {
+                try {
+                    if (html5QrCodeScanner.isScanning) {
+                        await html5QrCodeScanner.stop();
+                    }
+                    await html5QrCodeScanner.clear();
+                } catch (e) {
+                    console.warn("Scanner cleanup notice:", e);
+                }
+                html5QrCodeScanner = null;
+            }
+
+            cameraActive = false;
+
+            // Reset Button UI
+            btn.classList.remove('bg-rose-600', 'hover:bg-rose-700', 'shadow-rose-500/25');
+            btn.classList.add('bg-indigo-600', 'hover:bg-indigo-700', 'shadow-indigo-500/25');
+            btnText.innerText = 'Aktifkan Kamera Scan';
+            btnIcon.className = 'fa-solid fa-camera';
+
+            // Animate Slide Up & Fade Out
+            container.classList.remove('opacity-100', 'max-h-[500px]');
+            container.classList.add('opacity-0', 'max-h-0');
+
+            setTimeout(() => {
+                if (!cameraActive) {
+                    container.classList.add('hidden');
+                }
+            }, 300);
         }
 
         // Barcode Scan Success Callback
